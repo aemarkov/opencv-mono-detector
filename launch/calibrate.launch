@@ -1,0 +1,9 @@
+<!-- Calibrate single camera
+     Use my camera config -->
+<launch>
+    <include file="$(find mono_object_finder)/launch/dell_cam.launch" />
+    <node name="calibrator" pkg="camera_calibration" type="cameracalibrator.py"
+        args="--size 7x5 --square 0.3" output="screen">
+        <remap from="image" to="/camera/image_raw"/>
+    </node>
+</launch>
