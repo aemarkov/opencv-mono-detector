@@ -6,6 +6,7 @@ import yaml
 import os
 
 from settings import Settings
+from calib import CameraCalibration
 import ui
 
 def init_argparse():
@@ -29,24 +30,10 @@ def make_default_config():
         min_size=Settings(i=7, value=0, max=5000)
     )
 
-# Read matrix with given shape from file
-def parse_array(node):
-    return np.reshape(np.array(node['data']), (node['rows'], node['cols']))
-
-# Load calibration data from file
-def load_calib(path):
-    with open(path, 'r') as f:
-        calib = yaml.load(f)
-        width = calib['image_width']
-        height = calib['image_height']
-        camera_matrix = parse_array(calib['camera_matrix'])
-        distortion = parse_array(calib['distortion_coefficients'])
-        return (width, height), camera_matrix, distortion
-
 # Init matrices to perform undistortion using remap()
-def init_undistort(size, camera_mat, dist_coefs, alpha):
-    new_camera_mat, _ = cv2.getOptimalNewCameraMatrix(camera_mat, dist_coefs, size, alpha)
-    return cv2.initUndistortRectifyMap(camera_mat, dist_coefs, None, new_camera_mat, size, cv2.CV_16SC2)
+def init_undistort(calib, alpha):
+    new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(calib.camera_matrix, calib.distortion, calib.size, alpha)
+    return cv2.initUndistortRectifyMap(calib.camera_matrix, calib.distortion, None, new_camera_matrix, calib.size, cv2.CV_16SC2)
 
 # Binarize and find object
 def find_object(frame, settings):
@@ -99,8 +86,8 @@ def main():
     config = Settings.load(args.config, default=make_default_config())
     ui.create('controls', config)
 
-    size, camera_mat, dist_coefs = load_calib(args.calibration)
-    mat1, mat2 = init_undistort(size, camera_mat, dist_coefs, 1.0)
+    calibration = CameraCalibration.load(args.calibration)
+    mat1, mat2 = init_undistort(calibration, 1.0)
 
     # Read video from camera and process
     cap = cv2.VideoCapture(args.capture)

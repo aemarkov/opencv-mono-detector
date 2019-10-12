@@ -1,3 +1,7 @@
+#
+# Helpers to automatically create OpenCV trackbars to change the settings
+#
+
 import cv2
 
 def __none(x):

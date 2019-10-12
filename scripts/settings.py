@@ -1,3 +1,7 @@
+#
+# Helpers to store and load application settings to the YAML file
+#
+
 import os
 import yaml
 
