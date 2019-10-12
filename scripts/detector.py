@@ -16,62 +16,18 @@ def init_argparse():
     parser.add_argument('--size', type=float, help='Object size (diameter) in meters')
     return parser
 
-# Convert dictionary to the python object for more convenient usage
-def dict_to_obj(name, dictionary):
-    obj =  type(name, (object,), {})()
-    for key in dictionary:
-        if type(dictionary[key]) is dict:
-            obj.__dict__[key] = dict_to_obj(key.title(), dictionary[key])
-        else:
-            obj.__dict__[key] = dictionary[key]
-    return obj
 
 def make_default_config():
-    return {
-        'color_threshold': {
-            'min': { 'h': 0, 's': 0, 'v': 0 },
-            'max': { 'h': 0, 's': 0, 'v': 0}
-        },
-        'blur': 0,
-        'area_threshold': 0
-    }
-
-# Load settings from YAML file
-def load_settings(file):
-    if file is None or not os.path.isfile(file):
-        return dict_to_obj(make_default_config())
-
-    with open(file, 'r') as f:
-        return dict_to_obj(yaml.load(f.read()))
-
-
-def none(a):
-    pass
-
-# Create trackbars
-def create_ui(settings):
-    cv2.namedWindow('controls')
-    cv2.createTrackbar('H min', 'controls', settings['color_threshold']['min']['h'], 180, none)
-    cv2.createTrackbar('H max', 'controls', settings['color_threshold']['max']['h'], 180, none)
-    cv2.createTrackbar('S min', 'controls', settings['color_threshold']['min']['s'], 255, none)
-    cv2.createTrackbar('S max', 'controls', settings['color_threshold']['max']['s'], 255, none)
-    cv2.createTrackbar('V min', 'controls', settings['color_threshold']['min']['v'], 255, none)
-    cv2.createTrackbar('V max', 'controls', settings['color_threshold']['min']['v'], 255, none)
-    cv2.createTrackbar('blur',  'controls', settings['blur'], 21, none)
-    cv2.createTrackbar('threshold', 'controls', settings['area_threshold'], 5000, none)
-
-# Get current trackbars values
-def update_settings(settings):
-    settings['color_threshold']['min']['h'] = cv2.getTrackbarPos('H min', 'controls')
-    settings['color_threshold']['max']['h'] = cv2.getTrackbarPos('H max', 'controls')
-    settings['color_threshold']['min']['s'] = cv2.getTrackbarPos('S min', 'controls')
-    settings['color_threshold']['max']['s'] = cv2.getTrackbarPos('S max', 'controls')
-    settings['color_threshold']['min']['v'] = cv2.getTrackbarPos('V min', 'controls')
-    settings['color_threshold']['max']['v'] = cv2.getTrackbarPos('V max', 'controls')
-    settings['blur'] = cv2.getTrackbarPos('blur', 'controls')
-    settings['area_threshold']['min']['h'] = cv2.getTrackbarPos('threshold', 'controls')
-    if settings['blur'] % 2 != 1:
-        settings['blur'] += 1
+    return Settings(
+        h_min=Settings(i=0, value=0, max=180),
+        h_max=Settings(i=1, value=180, max=180),
+        s_min=Settings(i=2, value=0, max=255),
+        s_max=Settings(i=3, value=255, max=255),
+        v_min=Settings(i=4, value=0, max=255),
+        v_max=Settings(i=5, value=255, max=255),
+        blur=Settings(i=6, value=0, max=21),
+        min_size=Settings(i=7, value=0, max=5000)
+    )
 
 # Read matrix with given shape from file
 def parse_array(node):
@@ -94,31 +50,35 @@ def init_undistort(size, camera_mat, dist_coefs, alpha):
 
 # Binarize and find object
 def find_object(frame, settings):
+    # Gaussian blur kernel size should be odd
+    if settings.blur.value % 2 == 0:
+        settings.blur.value += 1
+
     # Binarize image to find color
-    blurred = cv2.GaussianBlur(frame, (settings['blur'], settings['blur']), 0)
+    blurred = cv2.GaussianBlur(frame, (settings.blur.value, settings.blur.value), 0)
     hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
-    binary = cv2.inRange(hsv, (settings['color']['min']['h'], settings['color']['min']['s'], settings['color']['min']['v']),
-                              (settings['color']['max']['h'], settings['color']['max']['s'], settings['color']['max']['v']))
+    binary = cv2.inRange(hsv, (settings.h_min.value, settings.s_min.value, settings.v_min.value),
+                              (settings.h_max.value, settings.s_max.value, settings.v_max.value))
+
+    cv2.imshow('binary', binary)
 
     # Find all contours
     _, contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
     if len(contours) == 0:
         return None
 
     # Find contour with biggest area
     index, area = max([(index, cv2.contourArea(contour)) for index, contour in enumerate(contours)], key=lambda x: x[1])
-    #if settings.args.is_gui:
     cv2.drawContours(frame, contours, -1, (0, 0, 255), 3)
 
-    if area < settings['area_threshold']:
+    if area < settings.min_size.value:
         return None
 
     # Find biggest contour center
     contour = contours[index]
     moments = cv2.moments(contour)
     center = (int(moments['m10']/moments['m00']), int(moments['m01']/moments['m00']))
-    #if settings.args.is_gui:
+
     cv2.drawContours(frame, contours, index, (0, 255, 0), 3)
     cv2.circle(frame, center, 5, (0, 255, 255), 3)
 
@@ -129,8 +89,15 @@ def main():
     parser = init_argparse()
     args = parser.parse_args()
 
-    settings = load_settings(args.config)
-    create_ui(settings)
+    print('----------------------------------------------')
+    print('OpenCV object detector')
+    print('Controls:')
+    print('    - S     Save current config')
+    print('    - ESC   Exit without saving current config')
+    print('----------------------------------------------')
+
+    config = Settings.load(args.config, default=make_default_config())
+    ui.create('controls', config)
 
     size, camera_mat, dist_coefs = load_calib(args.calibration)
     mat1, mat2 = init_undistort(size, camera_mat, dist_coefs, 1.0)
@@ -138,18 +105,23 @@ def main():
     # Read video from camera and process
     cap = cv2.VideoCapture(args.capture)
     while True:
-        update_settings(settings)
+        ui.read('controls', config)
 
         # Read and undistort image from camera
         _, frame = cap.read()
         undistorted = cv2.remap(frame, mat1, mat2, cv2.INTER_LINEAR)
 
-        center = find_object(undistorted, settings)
+        center = find_object(undistorted, config)
 
-        cv2.imshow('binary', undistorted)
-        cv2.imshow('rgb', frame)
+        cv2.imshow('rgb', undistorted)
 
-        cv2.waitKey(1)
+        key = cv2.waitKey(1)
+        if key == 115:
+            print('Saving...')
+            config.store(args.config)
+        if key == 27:
+            print('Exit')
+            exit(0)
 
 if __name__ == "__main__":
     main()
