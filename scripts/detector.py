@@ -9,6 +9,16 @@ from settings import Settings
 from calib import CameraCalibration
 import ui
 
+try:
+    import rospy
+    from std_msgs.msg import ColorRGBA
+    from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion, Vector3
+    from visualization_msgs.msg import Marker
+    is_ros = True
+except ImportError:
+    print('Failed to import ROS')
+    is_false = True
+
 def init_argparse():
     parser = argparse.ArgumentParser(description='Find object with given color and calculate ray or position')
     parser.add_argument('--capture', type=int, default=0, help='OpenCV video capture')
@@ -76,6 +86,32 @@ def find_object(frame, settings, args):
 
     return center
 
+def reproject(center, calib):
+    u, v = center
+    Cx = calib.camera_matrix[0, 2]
+    Cy = calib.camera_matrix[1, 2]
+    fx = calib.camera_matrix[0, 0]
+    fy = calib.camera_matrix[1, 1]
+    return np.array([(u - Cx)/fx, (v - Cy)/fy, 1])
+
+def publish(vector, pose_pub, line_pub):
+    x, y, z = vector
+    point = Point(z, x, y)
+
+    pose = PoseStamped()
+    pose.header.frame_id = 'map' # TODO: Use camera frame
+    pose.pose.position = point
+
+    marker = Marker()
+    marker.type = Marker.LINE_LIST
+    marker.header.frame_id = 'map'
+    marker.scale = Vector3(0.01, 0, 0)
+    marker.color = ColorRGBA(1, 0, 0, 1)
+    marker.points.append(Point(0, 0, 0))
+    marker.points.append(point)
+
+    pose_pub.publish(pose)
+    line_pub.publish(marker)
 
 def main():
     parser = init_argparse()
@@ -96,6 +132,11 @@ def main():
     calibration = CameraCalibration.load(args.calibration)
     mat1, mat2 = init_undistort(calibration, 1.0)
 
+    if is_ros:
+        rospy.init_node('object_finder')
+        pose_pub = rospy.Publisher('object', PoseStamped, queue_size=1)
+        line_pub = rospy.Publisher('line', Marker, queue_size=1)
+
     # Read video from camera and process
     cap = cv2.VideoCapture(args.capture)
     while True:
@@ -107,6 +148,10 @@ def main():
         undistorted = cv2.remap(frame, mat1, mat2, cv2.INTER_LINEAR)
 
         center = find_object(undistorted, config, args)
+        if center != None:
+            point_3d = reproject(center, calibration)
+            if is_ros:
+                publish(point_3d, pose_pub, line_pub)
 
         if args.gui == 'base' or args.gui == 'full':
             cv2.imshow('rgb', undistorted)
