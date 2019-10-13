@@ -17,7 +17,7 @@ try:
     is_ros = True
 except ImportError:
     print('Failed to import ROS')
-    is_false = True
+    is_ros = True
 
 def init_argparse():
     parser = argparse.ArgumentParser(description='Find object with given color and calculate ray or position')
@@ -26,6 +26,7 @@ def init_argparse():
     parser.add_argument('--calibration', help='Path to the camera calibration file')
     parser.add_argument('--size', type=float, help='Object size (diameter) in meters')
     parser.add_argument('--gui', choices=['base', 'full'], help='Show GUI')
+    parser.add_argument('--ros', action='store_true', help='Enable ROS')
     return parser
 
 
@@ -86,6 +87,7 @@ def find_object(frame, settings, args):
 
     return center
 
+# Reproject 2D coords to the 3D
 def reproject(center, calib):
     u, v = center
     Cx = calib.camera_matrix[0, 2]
@@ -94,6 +96,7 @@ def reproject(center, calib):
     fy = calib.camera_matrix[1, 1]
     return np.array([(u - Cx)/fx, (v - Cy)/fy, 1])
 
+# Publish object position to ROS
 def publish(vector, pose_pub, line_pub):
     x, y, z = vector
     point = Point(z, x, y)
@@ -124,18 +127,24 @@ def main():
     print('    - ESC   Exit without saving current config')
     print('----------------------------------------------')
 
+    # Init ROS node and publishers
+    if args.ros and not is_ros:
+        print("Error: unable to import ROS, can't run with --ros flag ")
+        exit(0)
+
+    if args.ros:
+        rospy.init_node('object_finder')
+        pose_pub = rospy.Publisher('object', PoseStamped, queue_size=1)
+        line_pub = rospy.Publisher('line', Marker, queue_size=1)
+
     config = Settings.load(args.config, default=make_default_config())
 
     if args.gui == 'full':
         ui.create('controls', config)
 
+    # Load camera calibration settings and init matrices for undistortion
     calibration = CameraCalibration.load(args.calibration)
     mat1, mat2 = init_undistort(calibration, 1.0)
-
-    if is_ros:
-        rospy.init_node('object_finder')
-        pose_pub = rospy.Publisher('object', PoseStamped, queue_size=1)
-        line_pub = rospy.Publisher('line', Marker, queue_size=1)
 
     # Read video from camera and process
     cap = cv2.VideoCapture(args.capture)
@@ -147,10 +156,11 @@ def main():
         _, frame = cap.read()
         undistorted = cv2.remap(frame, mat1, mat2, cv2.INTER_LINEAR)
 
+        # Find objects and publish
         center = find_object(undistorted, config, args)
         if center != None:
             point_3d = reproject(center, calibration)
-            if is_ros:
+            if args.ros:
                 publish(point_3d, pose_pub, line_pub)
 
         if args.gui == 'base' or args.gui == 'full':

@@ -27,7 +27,7 @@ roscore
 ```
 3.2. Run the script
 ```bash
-./detector.py --calibration <path_to_calibration> --config <path_to_new_config> --gui base
+./detector.py --calibration <path_to_calibration> --config <path_to_new_config> --gui base --ros
 ```
 3.3. Open RViz
 ```
@@ -35,7 +35,7 @@ rviz
 ```
 3.4. Open RViz config `cfg/config.rviz` to see estimated object position
 
- 
+
 ## Usage
 ```
 usage: detector.py [-h] [--capture CAPTURE] [--config CONFIG]
@@ -52,4 +52,5 @@ optional arguments:
                         Path to the camera calibration file
   --size SIZE           Object size (diameter) in meters
   --gui {base,full}     Show GUI
+  --ros                 Enable ROS
 ```
