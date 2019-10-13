@@ -15,6 +15,7 @@ def init_argparse():
     parser.add_argument('--config', help='Path to the configuration file to open/save')
     parser.add_argument('--calibration', help='Path to the camera calibration file')
     parser.add_argument('--size', type=float, help='Object size (diameter) in meters')
+    parser.add_argument('--gui', choices=['base', 'full'], help='Show GUI')
     return parser
 
 
@@ -36,7 +37,7 @@ def init_undistort(calib, alpha):
     return cv2.initUndistortRectifyMap(calib.camera_matrix, calib.distortion, None, new_camera_matrix, calib.size, cv2.CV_16SC2)
 
 # Binarize and find object
-def find_object(frame, settings):
+def find_object(frame, settings, args):
     # Gaussian blur kernel size should be odd
     if settings.blur.value % 2 == 0:
         settings.blur.value += 1
@@ -47,7 +48,8 @@ def find_object(frame, settings):
     binary = cv2.inRange(hsv, (settings.h_min.value, settings.s_min.value, settings.v_min.value),
                               (settings.h_max.value, settings.s_max.value, settings.v_max.value))
 
-    cv2.imshow('binary', binary)
+    if args.gui == 'full':
+        cv2.imshow('binary', binary)
 
     # Find all contours
     _, contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -56,7 +58,9 @@ def find_object(frame, settings):
 
     # Find contour with biggest area
     index, area = max([(index, cv2.contourArea(contour)) for index, contour in enumerate(contours)], key=lambda x: x[1])
-    cv2.drawContours(frame, contours, -1, (0, 0, 255), 3)
+
+    if args.gui == 'full':
+        cv2.drawContours(frame, contours, -1, (0, 0, 255), 3)
 
     if area < settings.min_size.value:
         return None
@@ -66,8 +70,9 @@ def find_object(frame, settings):
     moments = cv2.moments(contour)
     center = (int(moments['m10']/moments['m00']), int(moments['m01']/moments['m00']))
 
-    cv2.drawContours(frame, contours, index, (0, 255, 0), 3)
-    cv2.circle(frame, center, 5, (0, 255, 255), 3)
+    if args.gui == 'base' or args.gui == 'full':
+        cv2.drawContours(frame, contours, index, (0, 255, 0), 3)
+        cv2.circle(frame, center, 5, (0, 255, 255), 3)
 
     return center
 
@@ -84,7 +89,9 @@ def main():
     print('----------------------------------------------')
 
     config = Settings.load(args.config, default=make_default_config())
-    ui.create('controls', config)
+
+    if args.gui == 'full':
+        ui.create('controls', config)
 
     calibration = CameraCalibration.load(args.calibration)
     mat1, mat2 = init_undistort(calibration, 1.0)
@@ -92,15 +99,17 @@ def main():
     # Read video from camera and process
     cap = cv2.VideoCapture(args.capture)
     while True:
-        ui.read('controls', config)
+        if args.gui == 'full':
+            ui.read('controls', config)
 
         # Read and undistort image from camera
         _, frame = cap.read()
         undistorted = cv2.remap(frame, mat1, mat2, cv2.INTER_LINEAR)
 
-        center = find_object(undistorted, config)
+        center = find_object(undistorted, config, args)
 
-        cv2.imshow('rgb', undistorted)
+        if args.gui == 'base' or args.gui == 'full':
+            cv2.imshow('rgb', undistorted)
 
         key = cv2.waitKey(1)
         if key == 115:
