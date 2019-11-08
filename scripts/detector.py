@@ -22,8 +22,8 @@ except ImportError:
 def init_argparse():
     parser = argparse.ArgumentParser(description='Find object with given color and calculate ray or position')
     parser.add_argument('--capture', type=int, default=0, help='OpenCV video capture')
-    parser.add_argument('--config', help='Path to the configuration file to open/save')
-    parser.add_argument('--calibration', help='Path to the camera calibration file')
+    parser.add_argument('--config', required=True, help='Path to the configuration file to open/save')
+    parser.add_argument('--calibration', required=True, help='Path to the camera calibration file')
     parser.add_argument('--size', type=float, help='Object size (diameter) in meters')
     parser.add_argument('--gui', choices=['base', 'full'], help='Show GUI')
     parser.add_argument('--ros', action='store_true', help='Enable ROS')
@@ -138,12 +138,17 @@ def main():
         line_pub = rospy.Publisher('line', Marker, queue_size=1)
 
     config = Settings.load(args.config, default=make_default_config())
+    if config == None:
+        exit(1)
 
     if args.gui == 'full':
         ui.create('controls', config)
 
     # Load camera calibration settings and init matrices for undistortion
     calibration = CameraCalibration.load(args.calibration)
+    if calibration == None:
+        exit(1)
+
     mat1, mat2 = init_undistort(calibration, 1.0)
 
     # Read video from camera and process

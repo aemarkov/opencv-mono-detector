@@ -19,13 +19,17 @@ class Settings:
         Returns:
             New Settings instance
         """
-        if default != None:
-            if filename == None or not os.path.isfile(filename):
-                return default
+        if default is not None:
+           if filename == None or not os.path.isfile(filename):
+               return default
 
-        with open(filename, 'r') as file:
-            data =  yaml.load(file.read())
-            return Settings.from_dict(data)
+        try:
+            with open(filename, 'r') as file:
+                data =  yaml.load(file.read())
+                return Settings.from_dict(data)
+        except Exception as ex:
+            print('Failed to load config {}: {}'.format(filename, str(ex)))
+            return None
 
     def store(self, filename):
         """
