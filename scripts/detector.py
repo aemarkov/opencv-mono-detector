@@ -27,6 +27,7 @@ def init_argparse():
     parser.add_argument('--size', type=float, help='Object size (diameter) in meters')
     parser.add_argument('--gui', choices=['base', 'full'], help='Show GUI')
     parser.add_argument('--ros', action='store_true', help='Enable ROS')
+    parser.add_argument('--tuning', action='tuning_true', help='Run in tuning mode, no projection')
     return parser
 
 
@@ -163,7 +164,7 @@ def main():
 
         # Find objects and publish
         center = find_object(undistorted, config, args)
-        if center != None:
+        if center != None and not args.tuning:
             point_3d = reproject(center, calibration)
             if args.ros:
                 publish(point_3d, pose_pub, line_pub)
