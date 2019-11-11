@@ -27,7 +27,7 @@ def init_argparse():
     parser.add_argument('--size', type=float, help='Object size (diameter) in meters')
     parser.add_argument('--gui', choices=['base', 'full'], help='Show GUI')
     parser.add_argument('--ros', action='store_true', help='Enable ROS')
-    parser.add_argument('--tuning', action='tuning_true', help='Run in tuning mode, no projection')
+    parser.add_argument('--tuning', action='store_true', help='Run in tuning mode, no projection')
     return parser
 
 
@@ -80,6 +80,8 @@ def find_object(frame, settings, args):
     # Find biggest contour center
     contour = contours[index]
     moments = cv2.moments(contour)
+    if moments['m00'] < 1:
+       return None
     center = (int(moments['m10']/moments['m00']), int(moments['m01']/moments['m00']))
 
     if args.gui == 'base' or args.gui == 'full':
