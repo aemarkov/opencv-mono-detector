@@ -9,15 +9,13 @@ from settings import Settings
 from calib import CameraCalibration
 import ui
 
-try:
-    import rospy
-    from std_msgs.msg import ColorRGBA
-    from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion, Vector3
-    from visualization_msgs.msg import Marker
-    is_ros = True
-except ImportError:
-    print('Failed to import ROS')
-    is_ros = True
+import rospy
+from std_msgs.msg import ColorRGBA
+from sensor_msgs.msg import Image
+from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion, Vector3
+from visualization_msgs.msg import Marker
+from cv_bridge import CvBridge
+
 
 def init_argparse():
     parser = argparse.ArgumentParser(description='Find object with given color and calculate ray or position')
@@ -26,7 +24,6 @@ def init_argparse():
     parser.add_argument('--calibration', required=True, help='Path to the camera calibration file')
     parser.add_argument('--size', type=float, help='Object size (diameter) in meters')
     parser.add_argument('--gui', choices=['base', 'full'], help='Show GUI')
-    parser.add_argument('--ros', action='store_true', help='Enable ROS')
     parser.add_argument('--tuning', action='store_true', help='Run in tuning mode, no projection')
     return parser
 
@@ -119,9 +116,41 @@ def publish(vector, pose_pub, line_pub):
     pose_pub.publish(pose)
     line_pub.publish(marker)
 
-def main():
+def image_callback(msg):
+    if args.gui == 'full':
+            ui.read('controls', config)
+
+    frame = bridge.imgmsg_to_cv2(msg, "bgr8")
+    undistorted = cv2.remap(frame, mat1, mat2, cv2.INTER_LINEAR)
+
+    # Find objects and publish
+    center = find_object(undistorted, config, args)
+    if center != None and not args.tuning:
+        point_3d = reproject(center, calibration)
+        publish(point_3d, pose_pub, line_pub)
+
+    if args.gui == 'base' or args.gui == 'full':
+        cv2.imshow('rgb', undistorted)
+
+    key = cv2.waitKey(1)
+    if key == 115:
+        print('Saving...')
+        config.store(args.config)
+    if key == 27:
+        print('Exit')
+        exit(0)
+
+
+
+if __name__ == "__main__":
     parser = init_argparse()
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
+
+    rospy.init_node('object_finder')
+    pose_pub = rospy.Publisher('object', PoseStamped, queue_size=1)
+    line_pub = rospy.Publisher('line', Marker, queue_size=1)
+    camera_sub = rospy.Subscriber('/camera/image_raw', Image, image_callback)
+    bridge = CvBridge()
 
     print('----------------------------------------------')
     print('OpenCV object detector')
@@ -129,16 +158,6 @@ def main():
     print('    - S     Save current config')
     print('    - ESC   Exit without saving current config')
     print('----------------------------------------------')
-
-    # Init ROS node and publishers
-    if args.ros and not is_ros:
-        print("Error: unable to import ROS, can't run with --ros flag ")
-        exit(0)
-
-    if args.ros:
-        rospy.init_node('object_finder')
-        pose_pub = rospy.Publisher('object', PoseStamped, queue_size=1)
-        line_pub = rospy.Publisher('line', Marker, queue_size=1)
 
     config = Settings.load(args.config, default=make_default_config())
     if config == None:
@@ -153,34 +172,4 @@ def main():
         exit(1)
 
     mat1, mat2 = init_undistort(calibration, 1.0)
-
-    # Read video from camera and process
-    cap = cv2.VideoCapture(args.capture)
-    while True:
-        if args.gui == 'full':
-            ui.read('controls', config)
-
-        # Read and undistort image from camera
-        _, frame = cap.read()
-        undistorted = cv2.remap(frame, mat1, mat2, cv2.INTER_LINEAR)
-
-        # Find objects and publish
-        center = find_object(undistorted, config, args)
-        if center != None and not args.tuning:
-            point_3d = reproject(center, calibration)
-            if args.ros:
-                publish(point_3d, pose_pub, line_pub)
-
-        if args.gui == 'base' or args.gui == 'full':
-            cv2.imshow('rgb', undistorted)
-
-        key = cv2.waitKey(1)
-        if key == 115:
-            print('Saving...')
-            config.store(args.config)
-        if key == 27:
-            print('Exit')
-            exit(0)
-
-if __name__ == "__main__":
-    main()
+    rospy.spin()
