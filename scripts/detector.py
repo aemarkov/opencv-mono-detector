@@ -6,22 +6,23 @@ import yaml
 import os
 
 from settings import Settings
-from calib import CameraCalibration
 import ui
 
 import rospy
 from std_msgs.msg import ColorRGBA
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion, Vector3
 from visualization_msgs.msg import Marker
 from cv_bridge import CvBridge
+from message_filters import TimeSynchronizer, Subscriber
+
+camera_topic = '/camera'
 
 
 def init_argparse():
     parser = argparse.ArgumentParser(description='Find object with given color and calculate ray or position')
     parser.add_argument('--capture', type=int, default=0, help='OpenCV video capture')
     parser.add_argument('--config', required=True, help='Path to the configuration file to open/save')
-    parser.add_argument('--calibration', required=True, help='Path to the camera calibration file')
     parser.add_argument('--size', type=float, help='Object size (diameter) in meters')
     parser.add_argument('--gui', choices=['base', 'full'], help='Show GUI')
     parser.add_argument('--tuning', action='store_true', help='Run in tuning mode, no projection')
@@ -88,12 +89,13 @@ def find_object(frame, settings, args):
     return center
 
 # Reproject 2D coords to the 3D
-def reproject(center, calib):
+def reproject(center, camera_matrix):
+    # camera matrix - 3x3 matrix in row-major order
     u, v = center
-    Cx = calib.camera_matrix[0, 2]
-    Cy = calib.camera_matrix[1, 2]
-    fx = calib.camera_matrix[0, 0]
-    fy = calib.camera_matrix[1, 1]
+    Cx = camera_matrix[0*3 + 2]
+    Cy = camera_matrix[1*3 + 2]
+    fx = camera_matrix[0*3 + 0]
+    fy = camera_matrix[1*3 + 1]
     return np.array([(u - Cx)/fx, (v - Cy)/fy, 1])
 
 # Publish object position to ROS
@@ -116,21 +118,20 @@ def publish(vector, pose_pub, line_pub):
     pose_pub.publish(pose)
     line_pub.publish(marker)
 
-def image_callback(msg):
+def image_callback(image, camera_info):
     if args.gui == 'full':
             ui.read('controls', config)
 
-    frame = bridge.imgmsg_to_cv2(msg, "bgr8")
-    undistorted = cv2.remap(frame, mat1, mat2, cv2.INTER_LINEAR)
+    frame = bridge.imgmsg_to_cv2(image, "bgr8")
 
     # Find objects and publish
-    center = find_object(undistorted, config, args)
+    center = find_object(frame, config, args)
     if center != None and not args.tuning:
-        point_3d = reproject(center, calibration)
+        point_3d = reproject(center, camera_info.K)
         publish(point_3d, pose_pub, line_pub)
 
     if args.gui == 'base' or args.gui == 'full':
-        cv2.imshow('rgb', undistorted)
+        cv2.imshow('rgb', frame)
 
     key = cv2.waitKey(1)
     if key == 115:
@@ -149,7 +150,17 @@ if __name__ == "__main__":
     rospy.init_node('object_finder')
     pose_pub = rospy.Publisher('object', PoseStamped, queue_size=1)
     line_pub = rospy.Publisher('line', Marker, queue_size=1)
-    camera_sub = rospy.Subscriber('/camera/image_raw', Image, image_callback)
+
+    # img_sub = message_filters.Subscriber('/camera/image_raw', Image)
+    # info_sub = message_filters.Subscriber('/camera/camera_info', CameraInfo)
+    # sync = message_filters.TimeSynchronizer(img_sub, info_sub)
+    # sync.registerCallback(image_callback)
+
+    tss = TimeSynchronizer([
+        Subscriber("/image", Image),
+        Subscriber("/camera_info", CameraInfo)], 10)
+    tss.registerCallback(image_callback)
+
     bridge = CvBridge()
 
     print('----------------------------------------------')
@@ -166,10 +177,4 @@ if __name__ == "__main__":
     if args.gui == 'full':
         ui.create('controls', config)
 
-    # Load camera calibration settings and init matrices for undistortion
-    calibration = CameraCalibration.load(args.calibration)
-    if calibration == None:
-        exit(1)
-
-    mat1, mat2 = init_undistort(calibration, 1.0)
     rospy.spin()
