@@ -16,8 +16,11 @@ from visualization_msgs.msg import Marker
 from cv_bridge import CvBridge
 from message_filters import TimeSynchronizer, Subscriber
 
-camera_topic = '/camera'
-
+IMAGE_TOPIC = '/image'
+CAMERA_INFO_TOPIC='/camera_info'
+MARKER_TOPIC='/direction'
+POS_TOPIC='/object'
+FRAME='base_link'
 
 def init_argparse():
     parser = argparse.ArgumentParser(description='Find object with given color and calculate ray or position')
@@ -89,13 +92,14 @@ def find_object(frame, settings, args):
     return center
 
 # Reproject 2D coords to the 3D
-def reproject(center, camera_matrix):
+def reproject(center, camera_info):
     # camera matrix - 3x3 matrix in row-major order
     u, v = center
-    Cx = camera_matrix[0*3 + 2]
-    Cy = camera_matrix[1*3 + 2]
-    fx = camera_matrix[0*3 + 0]
-    fy = camera_matrix[1*3 + 1]
+    u = camera_info.width - u
+    Cx = camera_info.K[0*3 + 2]
+    Cy = camera_info.K[1*3 + 2]
+    fx = camera_info.K[0*3 + 0]
+    fy = camera_info.K[1*3 + 1]
     return np.array([(u - Cx)/fx, (v - Cy)/fy, 1])
 
 # Publish object position to ROS
@@ -104,12 +108,12 @@ def publish(vector, pose_pub, line_pub):
     point = Point(z, x, y)
 
     pose = PoseStamped()
-    pose.header.frame_id = 'map' # TODO: Use camera frame
+    pose.header.frame_id = FRAME
     pose.pose.position = point
 
     marker = Marker()
     marker.type = Marker.LINE_LIST
-    marker.header.frame_id = 'map'
+    marker.header.frame_id = FRAME
     marker.scale = Vector3(0.01, 0, 0)
     marker.color = ColorRGBA(1, 0, 0, 1)
     marker.points.append(Point(0, 0, 0))
@@ -127,7 +131,7 @@ def image_callback(image, camera_info):
     # Find objects and publish
     center = find_object(frame, config, args)
     if center != None and not args.tuning:
-        point_3d = reproject(center, camera_info.K)
+        point_3d = reproject(center, camera_info)
         publish(point_3d, pose_pub, line_pub)
 
     if args.gui == 'base' or args.gui == 'full':
@@ -148,17 +152,12 @@ if __name__ == "__main__":
     args, unknown = parser.parse_known_args()
 
     rospy.init_node('object_finder')
-    pose_pub = rospy.Publisher('object', PoseStamped, queue_size=1)
-    line_pub = rospy.Publisher('line', Marker, queue_size=1)
-
-    # img_sub = message_filters.Subscriber('/camera/image_raw', Image)
-    # info_sub = message_filters.Subscriber('/camera/camera_info', CameraInfo)
-    # sync = message_filters.TimeSynchronizer(img_sub, info_sub)
-    # sync.registerCallback(image_callback)
+    pose_pub = rospy.Publisher(POS_TOPIC, PoseStamped, queue_size=1)
+    line_pub = rospy.Publisher(MARKER_TOPIC, Marker, queue_size=1)
 
     tss = TimeSynchronizer([
-        Subscriber("/image", Image),
-        Subscriber("/camera_info", CameraInfo)], 10)
+        Subscriber(IMAGE_TOPIC, Image),
+        Subscriber(CAMERA_INFO_TOPIC, CameraInfo)], 10)
     tss.registerCallback(image_callback)
 
     bridge = CvBridge()
