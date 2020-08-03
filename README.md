@@ -1,3 +1,5 @@
+**Note**: the content of this repo is now the part of the [hexapod_vstu](https://github.com/vstuhumanoid/hexapod_vstu) repo
+
 # opencv-mono-detector
 Simple object detection (by color) using mono-camera and reprojection into the 3D ray for ROS
 
